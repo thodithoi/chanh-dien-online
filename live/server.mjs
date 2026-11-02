@@ -40,7 +40,7 @@ try { saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) { if 
 if (saved.settings && typeof saved.settings === 'object') Object.assign(settings, saved.settings);
 const session = new Session(saved.session);
 const gifts = new GiftProcessor(saved.gifts);
-if (Array.isArray(saved.viewers)) for (const v of saved.viewers.slice(0, 100)) if (v && v.id && !v.demo) viewers.set(v.id, v);
+if (Array.isArray(saved.viewers)) for (const v of saved.viewers.slice(0, 1000)) if (v && v.id && !v.demo) viewers.set(v.id, v);
 const startedAt = saved.startedAt || Date.now();
 let saveTimer;
 function saveState() {
@@ -80,7 +80,7 @@ function snapshot(){ return { t:'state', settings, viewers:[...viewers.values()]
 function seat(id, name, opts = {}){
   let v = viewers.get(id);
   if (v){ v.lastAt = Date.now(); if (opts.avatar) v.avatar = opts.avatar; return { v, isNew:false }; }
-  if (viewers.size >= 100){                     // full: the longest-quiet non-donor stands up
+  if (viewers.size >= 1000){                     // full: the longest-quiet non-donor stands up
     const quiet = [...viewers.values()].filter(x => x.coins === 0).sort((a,b) => a.lastAt - b.lastAt)[0];
     if (!quiet) return { v:null, isNew:false };
     viewers.delete(quiet.id); broadcast({ t:'leave', id: quiet.id });
@@ -206,7 +206,7 @@ async function disconnectTikTok(){ if (tiktok){ try { await tiktok.disconnect();
 const DEMO_NAMES = ['Diệu Hạnh','Minh Tâm','Thiện Đức','Huệ An','Tịnh Nhã','Quảng Trí','Chơn Như','Pháp Hỷ','Nguyên Thanh','Tâm Đăng','Diệu Liên','Trí Hải','Phước Lộc','Hạnh Nguyện','Như Ý','Bảo Châu','Thanh Lương','Từ Tâm','An Lạc','Giác Hoa','Tuệ Minh','Liên Hương','Thu Hà','Ngọc Lan','Đức Anh','Hải Đăng','Mai Anh','Phương Thảo','Trung Kiên','Quang Huy','Bảo Ngọc','Diệu Linh'];
 function fillDemo(n){
   const have = [...viewers.values()].filter(v => v.demo).length;
-  for (let i = have; i < n && viewers.size < 100; i++){
+  for (let i = have; i < n && viewers.size < 1000; i++){
     const name = DEMO_NAMES[i % DEMO_NAMES.length] + (i >= DEMO_NAMES.length ? ' ' + (Math.floor(i / DEMO_NAMES.length) + 1) : '');
     seat('demo_' + i, name, { demo: true, skin: ['man','woman','woman','man','granny','monk','nun','child'][i % 8] });
   }
@@ -221,7 +221,7 @@ function onControl(m){
     case 'chat': { const n = String(m.name || 'Khách').slice(0, 18); onChat('sim_' + n, n, String(m.text || 'Nam mô A Di Đà Phật').slice(0, 120)); break; }
     case 'gift': { const n = String(m.name || 'Khách').slice(0, 18); onGift('sim_' + n, n, String(m.gift || 'Hoa hồng').slice(0, 30), clamp(m.count, 1, 99), clamp(m.diamonds, 1, 50000)); break; }
     case 'like': { const n=String(m.name || 'Khách').slice(0,18); onLike('sim_'+n,n,clamp(m.count,1,10000)); break; }
-    case 'fill': fillDemo(clamp(m.n, 1, 100)); addLog(`Đổ người mẫu: ${viewers.size} người`); break;
+    case 'fill': fillDemo(clamp(m.n, 1, 1000)); addLog(`Đổ người mẫu: ${viewers.size} người`); break;
     case 'clear': clearSeats(); break;
     case 'bell': broadcast({ t:'bell' }); break;
     case 'mo': broadcast({ t:'mo1' }); break;

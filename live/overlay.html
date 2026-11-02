@@ -67,7 +67,7 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:var(-
   <canvas id="c" width="1080" height="1920"></canvas>
   <div id="plaque" class="ui"><div id="title">Chánh Điện Tịnh Tâm</div><div id="subtitle">Nam Mô A Di Đà Phật</div></div>
   <div id="pills" class="ui">
-    <div class="pill"><span class="dot"></span><span id="count">0/24</span><small>đang<br>thiền</small></div>
+    <div class="pill"><span class="dot"></span><span id="count">0/24</span><small>đã<br>tham gia</small></div>
     <div class="pill">⏱ <span id="timer">00:00:00</span></div>
   </div>
   <div id="guide" class="card ui">
@@ -124,10 +124,23 @@ function layout(c){
 }
 const visitors = new Map();  // id -> visitor
 let order = [];               // ids in seating order
+let pageIndex = 0;
 function reseat(){
   order = order.filter(id => visitors.has(id));
-  order.forEach((id,i) => { const v = visitors.get(id), s = seats[i]; if (!v || !s) return; v.seat = s; if (v.state==='sit') { v.tx = s.x; v.ty = s.y; } });
+  const pages = Math.max(1, Math.ceil(order.length / seats.length));
+  pageIndex %= pages;
+  for (const v of visitors.values()) v.seat = null;
+  order.slice(pageIndex * seats.length, (pageIndex + 1) * seats.length).forEach((id,i) => {
+    const v = visitors.get(id), seat = seats[i]; if (!v || !seat) return;
+    v.seat = seat;
+    if (v.state === 'sit') { v.tx = seat.x; v.ty = seat.y; }
+  });
 }
+setInterval(() => {
+  if (order.length <= seats.length || activeCeremony) return;
+  pageIndex = (pageIndex + 1) % Math.ceil(order.length / seats.length);
+  reseat(); updateCount();
+}, 30000);
 document.getElementById('count').textContent = '0/24';
 
 /* the three fixed teachers in front of the altar */
@@ -143,7 +156,7 @@ function removeVisitor(id){ visitors.delete(id); reseat(); }
 
 /* ======================= HUD ======================= */
 let startedAt = Date.now();
-function updateCount(){ document.getElementById('count').textContent = `${visitors.size}/${cap}`; }
+function updateCount(){ const pages=Math.max(1,Math.ceil(visitors.size/cap)); document.getElementById('count').textContent = pages>1 ? `${visitors.size} · lượt ${pageIndex+1}/${pages}` : `${visitors.size}/${cap}`; }
 function renderMerit(){
   const top = [...visitors.values()].filter(v=>v.coins>0).sort((a,b)=>b.coins-a.coins).slice(0,5);
   const ol = document.getElementById('meritList'); ol.innerHTML='';
@@ -215,7 +228,7 @@ function hearts(v,n){ for (let i=0;i<Math.min(6,n);i++) petals.push({x:v.x+(Math
 
 let activeCeremony = null;
 function updateProgress(p){ if(!p) return; document.getElementById('progressV2').textContent=`Lạy ${p.bows % 108}/108 · Tràng hạt ${p.beads % 108}/108 · Hoa ${p.roses}`; }
-function beginCeremony(m){ const v=visitors.get(m.id); if(v) activeCeremony={id:m.id, start:performance.now(), x:v.x, y:v.y}; document.getElementById('giftWho').textContent=m.name; document.getElementById('giftWhat').textContent=`thành tâm dâng hoa hồng ×${m.count}`; document.getElementById('giftPray').textContent='Nam mô A Di Đà Phật'; const el=document.getElementById('gift'); el.classList.add('show'); clearTimeout(giftHide); giftHide=setTimeout(()=>el.classList.remove('show'),8500); }
+function beginCeremony(m){ const idx=order.indexOf(m.id); if(idx>=0){ pageIndex=Math.floor(idx/seats.length); reseat(); updateCount(); } const v=visitors.get(m.id); if(v && v.seat){ v.x=v.seat.x; v.y=v.seat.y; } if(v) activeCeremony={id:m.id, start:performance.now(), x:v.x, y:v.y}; document.getElementById('giftWho').textContent=m.name; document.getElementById('giftWhat').textContent=`thành tâm dâng hoa hồng ×${m.count}`; document.getElementById('giftPray').textContent='Nam mô A Di Đà Phật'; const el=document.getElementById('gift'); el.classList.add('show'); clearTimeout(giftHide); giftHide=setTimeout(()=>el.classList.remove('show'),8500); }
 /* ======================= server link ======================= */
 let ws=null;
 function connect(){
@@ -291,7 +304,7 @@ function frame(now){
     sprite(A[tc.skin],tc.x,tc.y,tc.s); tag(tc.name,tc.x,tc.y-tc.s*260-22,tc.s,'gold'); }
   // visitors back to front
   const bubbles=[];
-  const list=[...visitors.values()].sort((a,b)=>a.y-b.y);
+  const list=[...visitors.values()].filter(v=>v.seat).sort((a,b)=>a.y-b.y);
   for (const v of list){
     const anim=hasAnim(v.skin), s=v.seat?.scale||.4;
     if (v.state==='walk' && v.seat){
