@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bảng điều khiển · Chánh Điện Tịnh Tâm</title>
+<title>Bảng điều khiển · Chánh Điện Thiện An</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
 <style>
 /* Layout: three columns of cards (connection · interaction · sound/scene) over a status bar; collapses to one column on narrow windows. */
@@ -45,17 +45,25 @@ button.red{background:var(--red);border-color:#b84a33}
 </head>
 <body>
 <header>
-  <h1>Bảng điều khiển · Chánh Điện Tịnh Tâm</h1>
+  <h1>Bảng điều khiển · Chánh Điện Thiện An</h1>
   <div class="status">
     <span class="chip" id="srv">Server: …</span>
     <span class="chip" id="tt">TikTok: chưa kết nối</span>
+    <span class="chip" id="yt">YouTube: chưa kết nối</span>
     <span class="chip" id="cnt">0 người</span>
   </div>
 </header>
 
 <div class="grid">
   <section class="card">
-    <h2>1 · Kết nối TikTok LIVE</h2>
+    <h2>1 · Kết nối YouTube LIVE</h2>
+    <label for="ytVideo">Đường dẫn video LIVE hoặc mã video</label>
+    <input id="ytVideo" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+    <label for="ytKey">YouTube Data API key</label>
+    <input id="ytKey" type="password" autocomplete="off" placeholder="Nhập tại đây, không gửi qua chat">
+    <div class="row"><button class="primary" id="btnYTConnect">Kết nối YouTube</button><button id="btnYTDisconnect">Ngắt YouTube</button></div>
+    <p class="hint">Video cần đang LIVE và bật live chat. Chỉ đọc bình luận mới; lượt thích và Super Chat chưa được tích hợp. Khóa chỉ nằm trong bộ nhớ máy chủ và gửi tới Google, không lưu vào tệp.</p>
+    <h2>Kết nối TikTok LIVE</h2>
     <label for="uid">Username kênh đang live</label>
     <div class="row"><input id="uid" placeholder="@tenkenhcuaban" autocomplete="off"><button class="primary" id="btnConnect">Kết nối</button><button id="btnDisconnect">Ngắt</button></div>
     <p class="hint">Chỉ đọc sự kiện công khai của phòng live (bình luận, quà, tim). Không cần mật khẩu hay cookie TikTok. Phải bật LIVE trước rồi mới kết nối.</p>
@@ -111,7 +119,7 @@ button.red{background:var(--red);border-color:#b84a33}
     <div class="row"><button id="btnBell">🔔 Thỉnh chuông</button><button id="btnMo">Gõ mõ</button></div>
     <div id="bellStatus" class="hint">Đang kiểm tra bản thu chuông…</div>
     <h2>Cảnh</h2>
-    <label>Tên thiền đường<input id="title" value="Chánh Điện Tịnh Tâm"></label>
+    <label>Tên thiền đường<input id="title" value="Chánh Điện Thiện An"></label>
     <label>Dòng phụ<input id="subtitle" value="Nam Mô A Di Đà Phật"></label>
     <div class="row">
       <label>Số chỗ ngồi<select id="seatMode"><option value="auto">Tự mở rộng 24 → 100 mỗi lượt</option><option value="24">24</option><option value="36">36</option><option value="64">64</option><option value="100">100</option></select></label>
@@ -143,6 +151,7 @@ function renderPeople(){
   $('cnt').textContent = `${people.size} người`;
 }
 function showProgress(p){ if(p) $('progress').textContent=`Lạy: ${p.bows} (${p.bows % 108}/108) · Tràng hạt: ${p.beads} (${p.beads % 108}/108) · Hoa: ${p.roses} · Chờ dâng: ${p.queue.reduce((n,x)=>n+x.count,0)}`; }
+function setYT(st){ if(!st) return; const el=$('yt'); el.className='chip '+(st.status==='connected'?'ok':st.status==='error'?'bad':''); el.textContent='YouTube: '+(st.message || st.status); }
 function setTT(st){
   const el=$('tt'); el.className='chip ' + (st.status==='connected'?'ok':st.status==='error'?'bad':'');
   el.textContent = st.status==='connected' ? `TikTok: @${st.uniqueId} ✓` : st.status==='connecting' ? `TikTok: đang kết nối @${st.uniqueId}…` : st.status==='error' ? 'TikTok: lỗi kết nối' : 'TikTok: chưa kết nối';
@@ -153,11 +162,12 @@ function connect(){
   ws.onclose = () => { $('srv').textContent='Server: mất kết nối'; $('srv').className='chip bad'; setTimeout(connect, 2000); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.t==='state'){ showProgress(m.progress); fillSettings(m.settings); setTT(m.tiktok); people.clear(); for (const v of m.viewers) people.set(v.id,v); renderPeople(); }
+    if (m.t==='state'){ showProgress(m.progress); fillSettings(m.settings); setTT(m.tiktok); setYT(m.youtube); people.clear(); for (const v of m.viewers) people.set(v.id,v); renderPeople(); }
     else if (m.t==='progress') showProgress(m.progress);
     else if (m.t==='logs'){ $('log').textContent=''; m.lines.forEach(logLine); }
     else if (m.t==='log') logLine(m.line);
     else if (m.t==='tiktok') setTT(m);
+    else if (m.t==='youtube') setYT(m);
     else if (m.t==='join'){ people.set(m.v.id,m.v); renderPeople(); }
     else if (m.t==='leave'){ people.delete(m.id); renderPeople(); }
     else if (m.t==='gift'){ const p=people.get(m.id); if(p){ p.coins=m.total; renderPeople(); } }
@@ -167,6 +177,8 @@ function connect(){
 connect();
 fetch('/assets/audio/bell-neptun.wav',{method:'HEAD'}).then(r=>{ $('bellStatus').textContent=r.ok?'Chuông: đã có bản thu':'Chuông: chưa có bản thu; đang dùng âm tổng hợp'; }).catch(()=>{ $('bellStatus').textContent='Chuông: chưa kiểm tra được bản thu'; });
 
+$('btnYTConnect').onclick = () => { if(ws?.readyState!==1) { setYT({status:'error',message:'Máy chủ chưa kết nối.'}); return; } const apiKey=$('ytKey').value; send('youtube_connect',{video:$('ytVideo').value,apiKey}); $('ytKey').value=''; };
+$('btnYTDisconnect').onclick = () => send('youtube_disconnect');
 $('btnConnect').onclick = () => send('connect', { uniqueId: $('uid').value });
 $('uid').onkeydown = e => { if (e.key==='Enter') send('connect', { uniqueId: $('uid').value }); };
 $('btnDisconnect').onclick = () => send('disconnect');

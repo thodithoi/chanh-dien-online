@@ -1,4 +1,4 @@
-// Chánh Điện Tịnh Tâm — live server
+// Chánh Điện Thiện An — live server
 // Runs on the streaming PC. Serves the overlay + control panel, listens to a TikTok LIVE room,
 // keeps the list of seated viewers, generates Vietnamese voice lines with Edge TTS and pushes
 // everything to the overlay over WebSocket.
@@ -13,6 +13,7 @@ import { WebSocketServer } from 'ws';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { GiftProcessor } from './modules/gift-processor.mjs';
 import { Session } from './modules/session.mjs';
+import { YouTubeChat } from './modules/youtube.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');            // repo root: serves /assets, /live
@@ -23,7 +24,7 @@ const PORT = +process.env.PORT || 3000;
 
 /* ------------------------------------------------------------------ state */
 const settings = {
-  title: 'Chánh Điện Tịnh Tâm',
+  title: 'Chánh Điện Thiện An',
   subtitle: 'Nam Mô A Di Đà Phật',
   voice: 'vi-VN-NamMinhNeural',      // or vi-VN-HoaiMyNeural
   pitch: -18,                        // Hz
@@ -53,6 +54,7 @@ function saveState() {
 function stats() { broadcast({t:'progress', progress:session.snapshot()}); saveState(); }
 
 let tiktok = null, tiktokState = { status: 'idle', uniqueId: '', error: '' };
+let youtube = null, youtubeState = { status:'idle', message:'Chưa kết nối YouTube.' };
 const log = [];
 function addLog(s){ const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${s}`; log.push(line); if (log.length > 300) log.shift(); broadcast({ t:'log', line }, 'control'); console.log(line); }
 
@@ -75,7 +77,7 @@ function skinFromText(t){
 const DEFAULT_SKINS = ['man', 'woman', 'woman', 'man', 'granny'];
 
 function pub(v){ return { id:v.id, name:v.name, skin:v.skin, avatar:v.avatar||'', coins:v.coins, demo:!!v.demo }; }
-function snapshot(){ return { t:'state', settings, viewers:[...viewers.values()].map(pub), cap: capacity(), startedAt, tiktok: tiktokState, progress: session.snapshot() }; }
+function snapshot(){ return { t:'state', settings, viewers:[...viewers.values()].map(pub), cap: capacity(), startedAt, tiktok: tiktokState, youtube:youtubeState, progress: session.snapshot() }; }
 
 function seat(id, name, opts = {}){
   let v = viewers.get(id);
@@ -162,6 +164,19 @@ async function pumpTTS(){
   ttsBusy = false; setTimeout(pumpTTS, 50);
 }
 
+/* YouTube: the key is held in memory only; never log or include it in snapshots. */
+function connectYouTube(video, apiKey) {
+  if (youtube) youtube.stop();
+  let client;
+  client = new YouTubeChat({video, apiKey, onMessage:m=>onChat(m.id,m.name,m.text,m.avatar), onStatus:(status,message)=>{
+    if (youtube !== client) return;
+    youtubeState = {status,message}; broadcast({t:'youtube', ...youtubeState});
+  }});
+  youtube=client;
+  client.start();
+}
+function disconnectYouTube() { if(youtube) youtube.stop(); youtube=null; }
+
 /* --------------------------------------------------------------- TikTok */
 let TikTokLib = null;
 async function connectTikTok(uniqueId){
@@ -218,6 +233,8 @@ function onControl(m){
   switch (m.cmd){
     case 'connect': connectTikTok(m.uniqueId); break;
     case 'disconnect': disconnectTikTok(); addLog('Đã ngắt kết nối TikTok'); break;
+    case 'youtube_connect': connectYouTube(String(m.video||'').slice(0,500),String(m.apiKey||'').slice(0,300)); break;
+    case 'youtube_disconnect': disconnectYouTube(); break;
     case 'chat': { const n = String(m.name || 'Khách').slice(0, 18); onChat('sim_' + n, n, String(m.text || 'Nam mô A Di Đà Phật').slice(0, 120)); break; }
     case 'gift': { const n = String(m.name || 'Khách').slice(0, 18); onGift('sim_' + n, n, String(m.gift || 'Hoa hồng').slice(0, 30), clamp(m.count, 1, 99), clamp(m.diamonds, 1, 50000)); break; }
     case 'like': { const n=String(m.name || 'Khách').slice(0,18); onLike('sim_'+n,n,clamp(m.count,1,10000)); break; }
