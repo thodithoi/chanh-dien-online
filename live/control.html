@@ -109,6 +109,7 @@ button.red{background:var(--red);border-color:#b84a33}
       <label>Nhịp mõ (BPM)<input id="moBpm" type="number" min="20" max="120" value="52"></label>
     </div>
     <div class="row"><button id="btnBell">🔔 Thỉnh chuông</button><button id="btnMo">Gõ mõ</button></div>
+    <div id="bellStatus" class="hint">Đang kiểm tra bản thu chuông…</div>
     <h2>Cảnh</h2>
     <label>Tên thiền đường<input id="title" value="Chánh Điện Tịnh Tâm"></label>
     <label>Dòng phụ<input id="subtitle" value="Nam Mô A Di Đà Phật"></label>
@@ -164,6 +165,7 @@ function connect(){
   };
 }
 connect();
+fetch('/assets/audio/bell-neptun.wav',{method:'HEAD'}).then(r=>{ $('bellStatus').textContent=r.ok?'Chuông: đã có bản thu':'Chuông: chưa có bản thu; đang dùng âm tổng hợp'; }).catch(()=>{ $('bellStatus').textContent='Chuông: chưa kiểm tra được bản thu'; });
 
 $('btnConnect').onclick = () => send('connect', { uniqueId: $('uid').value });
 $('uid').onkeydown = e => { if (e.key==='Enter') send('connect', { uniqueId: $('uid').value }); };

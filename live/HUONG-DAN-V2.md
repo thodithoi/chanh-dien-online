@@ -7,3 +7,5 @@ Dữ liệu phiên được lưu tại `live/session-state.json` trên máy, kh�
 Chạy kiểm thử không cần kết nối TikTok: `cd live && node --test test/*.test.mjs`.
 
 Bản thử theo dõi tối đa 1.000 người trong danh sách phiên; overlay hiển thị tối đa 100 người mỗi lượt và đổi lượt sau 30 giây. Con số là người trong danh sách phiên, không phải số người đang xem TikTok. Khi đạt 1.000, người ít hoạt động chưa tặng quà có thể nhường chỗ. Các nút 300 và 1.000 dùng dữ liệu mô phỏng; việc chịu tải LIVE thực chưa được kiểm chứng.
+
+Chuông thu âm dự kiến: NEPTUN-Solo-07 của the_very_Real_Horst, giấy phép CC0, https://freesound.org/people/the_very_Real_Horst/sounds/240934/. Tải tệp gốc và đặt tại `assets/audio/bell-neptun.wav`; nếu chưa có, ứng dụng dùng chuông tổng hợp và bảng điều khiển hiển thị trạng thái. Tiếng mõ hiện được tạo bằng mã.

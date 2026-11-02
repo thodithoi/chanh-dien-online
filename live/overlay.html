@@ -184,7 +184,7 @@ function startAudio(){
   master = AC.createGain(); master.gain.value=.9; master.connect(AC.destination);
   musicGain = AC.createGain(); musicGain.gain.value=settings.music?.5:0; musicGain.connect(master);
   sfx = AC.createGain(); sfx.gain.value=1; sfx.connect(master);
-  nextTrack(); scheduleMo();
+  nextTrack(); scheduleMo(); loadRecordedBell();
 }
 function nextTrack(){
   if (musicEl){ musicEl.pause(); }
@@ -193,8 +193,14 @@ function nextTrack(){
 }
 function duck(on){ if(!musicGain) return; const t=AC.currentTime, target = !settings.music ? 0 : on ? .14 : .5; musicGain.gain.cancelScheduledValues(t); musicGain.gain.setValueAtTime(musicGain.gain.value,t); musicGain.gain.linearRampToValueAtTime(target,t+.5); }
 let haloPulse=0;
+let recordedBell = null;
+function loadRecordedBell(){
+  return fetch('/assets/audio/bell-neptun.wav').then(r=>{ if(!r.ok) throw Error('missing'); return r.arrayBuffer(); }).then(b=>AC.decodeAudioData(b)).then(b=>{ recordedBell=b; }).catch(()=>{});
+}
 function bell(big){
-  if(!AC) return; const t=AC.currentTime, k=big?1.7:1;
+  if(!AC) return;
+  if(recordedBell){ const sound=AC.createBufferSource(); sound.buffer=recordedBell; sound.connect(sfx); sound.start(); haloPulse=1; return; }
+  const t=AC.currentTime, k=big?1.7:1;
   for (const [f,a,d] of [[216,.55,7],[432,.35,5],[1296,.12,3],[2160,.05,2]]) { const o=AC.createOscillator(); o.type='sine'; o.frequency.value=f*(big?.75:1); const g=AC.createGain(); g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(a*k*.7,t+.015); g.gain.exponentialRampToValueAtTime(.0005,t+d*k); o.connect(g); g.connect(sfx); o.start(t); o.stop(t+d*k+.1); }
   haloPulse=1;
 }
