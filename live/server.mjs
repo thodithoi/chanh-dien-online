@@ -11,6 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import { GiftProcessor } from './modules/gift-processor.mjs';
+import { Session } from './modules/session.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');            // repo root: serves /assets, /live
@@ -26,14 +28,30 @@ const settings = {
   voice: 'vi-VN-NamMinhNeural',      // or vi-VN-HoaiMyNeural
   pitch: -18,                        // Hz
   rate: -20,                         // %
-  music: true, mo: true, moBpm: 52,
-  autoChant: true, chantEveryMin: 3,
+  music: true, mo: false, moBpm: 52,
   seatMode: 'auto',                  // auto | 24 | 36 | 64 | 100
   joinOnEnter: false,                // also seat viewers who only enter the room
   gifts: { readAll: true, minDiamonds: 1 },
 };
 const viewers = new Map();           // id -> { id, name, skin, avatar, coins, joinedAt, lastAt, lastText, lastTextAt, demo }
-const startedAt = Date.now();
+const STATE_FILE = process.env.STATE_FILE || path.join(__dirname, 'session-state.json');
+let saved = {};
+try { saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') console.error('Không thể đọc trạng thái:', e.message); }
+if (saved.settings && typeof saved.settings === 'object') Object.assign(settings, saved.settings);
+const session = new Session(saved.session);
+const gifts = new GiftProcessor(saved.gifts);
+if (Array.isArray(saved.viewers)) for (const v of saved.viewers.slice(0, 100)) if (v && v.id && !v.demo) viewers.set(v.id, v);
+const startedAt = saved.startedAt || Date.now();
+let saveTimer;
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { const tmp = STATE_FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({version:1, startedAt, settings, session:session.snapshot(), gifts:gifts.snapshot(), viewers:[...viewers.values()].filter(v => !v.demo)})); fs.renameSync(tmp, STATE_FILE); }
+    catch (e) { console.error('Không thể lưu trạng thái:', e.message); }
+  }, 100);
+}
+function stats() { broadcast({t:'progress', progress:session.snapshot()}); saveState(); }
+
 let tiktok = null, tiktokState = { status: 'idle', uniqueId: '', error: '' };
 const log = [];
 function addLog(s){ const line = `[${new Date().toLocaleTimeString('vi-VN')}] ${s}`; log.push(line); if (log.length > 300) log.shift(); broadcast({ t:'log', line }, 'control'); console.log(line); }
@@ -57,7 +75,7 @@ function skinFromText(t){
 const DEFAULT_SKINS = ['man', 'woman', 'woman', 'man', 'granny'];
 
 function pub(v){ return { id:v.id, name:v.name, skin:v.skin, avatar:v.avatar||'', coins:v.coins, demo:!!v.demo }; }
-function snapshot(){ return { t:'state', settings, viewers:[...viewers.values()].map(pub), cap: capacity(), startedAt, tiktok: tiktokState }; }
+function snapshot(){ return { t:'state', settings, viewers:[...viewers.values()].map(pub), cap: capacity(), startedAt, tiktok: tiktokState, progress: session.snapshot() }; }
 
 function seat(id, name, opts = {}){
   let v = viewers.get(id);
@@ -71,6 +89,8 @@ function seat(id, name, opts = {}){
         avatar: opts.avatar || '', coins: 0, joinedAt: Date.now(), lastAt: Date.now(), demo: !!opts.demo };
   viewers.set(id, v);
   broadcast({ t:'join', v: pub(v), cap: capacity() });
+  if (!v.demo) say(`Nam mô A Di Đà Phật. Chào mừng Phật tử ${spoken(v.name)} đến chánh điện.`, {tag:'welcome', id});
+  saveState();
   return { v, isNew:true };
 }
 
@@ -83,20 +103,35 @@ function onChat(id, name, text, avatar){
   if (!isNew && want && want !== v.skin){ v.skin = want; broadcast({ t:'skin', id, skin: want }); }
   v.lastText = text; v.lastTextAt = Date.now();
   broadcast({ t:'chat', id, name: v.name, text });
+  if (session.chat(id, text)) { broadcast({t:'bead', id, personal:session.personal[id], total:session.beads}); stats(); }
 }
 
+function onLike(id, name, count, avatar) {
+  if (!id) return;
+  seat(id, name || id, {avatar});
+  const n = session.like(id, count);
+  if (n) { broadcast({t:'like', id, n}); stats(); }
+}
 function onGift(id, name, giftName, count, diamonds, avatar){
+  if (!id || !count) return;
   giftName = String(giftName || 'quà').slice(0, 30); count = Math.max(1, Math.min(9999, +count || 1));
   const { v } = seat(id, name, { avatar });
-  if (!v) return;
-  const coins = Math.max(1, (diamonds || 1) * (count || 1));
-  v.coins += coins;
-  const prayer = (v.lastText && Date.now() - v.lastTextAt < 90_000 && v.lastText.length > 6) ? v.lastText : pickPrayer();
-  const tier = coins >= 99 ? 3 : coins >= 10 ? 2 : 1;
-  const line = `Nam mô A Di Đà Phật. Phật tử ${spoken(v.name)} thành tâm dâng ${giftName}${count > 1 ? ', ' + count + ' lần' : ''}. ${prayer}.`;
-  broadcast({ t:'gift', id, name: v.name, giftName, count, coins, total: v.coins, tier, prayer });
-  if (settings.gifts.readAll || coins >= settings.gifts.minDiamonds) say(line, { tag:'gift', id });
+  const coins = Math.max(1, (diamonds || 1) * count);
+  if (v) v.coins += coins;
+  if (/hoa hồng|hoa hong|rose/i.test(giftName)) {
+    session.rose(id, v?.name || name || 'Phật tử', count);
+    stats();
+  } else { broadcast({t:'gift', id, name:v?.name || name, giftName, count, coins, total:v?.coins || coins, tier:1, prayer:pickPrayer()}); saveState(); }
 }
+let ceremonyActive = null;
+function pumpCeremony() {
+  if (ceremonyActive || !session.queue.length || ![...wss.clients].some(c => c.readyState === 1 && c.role === 'overlay')) return;
+  ceremonyActive = { ...session.queue[0] };
+  broadcast({t:'ceremony', ...ceremonyActive});
+  say(`Nam mô A Di Đà Phật. Xin cảm ơn Phật tử ${spoken(ceremonyActive.name)} đã thành tâm dâng hoa.`, {tag:'gift'});
+  setTimeout(() => { if (session.queue[0]) { session.queue[0].count -= ceremonyActive.count; if (session.queue[0].count <= 0) session.queue.shift(); } ceremonyActive = null; stats(); }, 9000);
+}
+setInterval(pumpCeremony, 1000);
 
 function pickPrayer(){
   const P = ['Nguyện cầu gia đạo bình an, vạn sự cát tường', 'Nguyện cầu cha mẹ mạnh khỏe, sống lâu', 'Nguyện hồi hướng công đức cho khắp pháp giới chúng sinh',
@@ -108,7 +143,7 @@ const spoken = s => String(s).replace(/[_@.]+/g, ' ').replace(/[^\p{L}\p{N}\s]/g
 /* ------------------------------------------------------------------ TTS */
 const ttsQueue = []; let ttsBusy = false, ttsSeq = 0;
 function esc(s){ return String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c])); }
-function say(text, meta = {}){ if (ttsQueue.length >= 15) { addLog('Hàng đợi giọng đọc đầy, bỏ qua 1 câu'); return; } ttsQueue.push({ text: String(text).slice(0, 500), meta }); pumpTTS(); }
+function say(text, meta = {}){ if (process.env.TTS_DISABLED === '1') return; if (ttsQueue.length >= 15) { addLog('Hàng đợi giọng đọc đầy, bỏ qua 1 câu'); return; } ttsQueue.push({ text: String(text).slice(0, 500), meta }); pumpTTS(); }
 async function pumpTTS(){
   if (ttsBusy || !ttsQueue.length) return; ttsBusy = true;
   const { text, meta } = ttsQueue.shift();
@@ -127,17 +162,6 @@ async function pumpTTS(){
   ttsBusy = false; setTimeout(pumpTTS, 50);
 }
 
-const CHANTS = [
-  'Nam mô Bổn Sư Thích Ca Mâu Ni Phật. Nguyện đem công đức này, hướng về khắp tất cả, đệ tử và chúng sinh, đều trọn thành Phật đạo.',
-  'Nam mô A Di Đà Phật. Nguyện sanh Tây Phương Tịnh Độ trung, cửu phẩm liên hoa vi phụ mẫu.',
-  'Nam mô Đại Bi Quán Thế Âm Bồ Tát. Nguyện cho tất cả chúng sinh thân tâm an lạc, tai qua nạn khỏi.',
-  'Quán Tự Tại Bồ Tát hành thâm Bát Nhã Ba La Mật Đa thời, chiếu kiến ngũ uẩn giai không, độ nhất thiết khổ ách.',
-];
-let chantIdx = 0, chantTimer = null;
-function chant(){ const text = CHANTS[chantIdx++ % CHANTS.length]; broadcast({ t:'chant', text }); say(text, { tag:'chant' }); }
-function scheduleChant(){ clearInterval(chantTimer); if (settings.autoChant) chantTimer = setInterval(chant, Math.max(1, settings.chantEveryMin) * 60_000); }
-scheduleChant();
-
 /* --------------------------------------------------------------- TikTok */
 let TikTokLib = null;
 async function connectTikTok(uniqueId){
@@ -151,17 +175,19 @@ async function connectTikTok(uniqueId){
     const conn = new TikTokLiveConnection(uniqueId, { enableExtendedGiftInfo: true, processInitialData: false });
     const av = u => u?.profilePicture?.url?.[0] || u?.profilePicture?.urlList?.[0] || u?.avatarThumb?.urlList?.[0] || u?.avatarThumb?.url?.[0] || '';
     const nm = u => u?.nickname || u?.uniqueId || 'ẩn danh';
-    conn.on(WebcastEvent.CHAT, d => onChat(d.user?.uniqueId || d.user?.userId, nm(d.user), d.comment, av(d.user)));
+    conn.on(WebcastEvent.CHAT, d => onChat(d.user?.userId || d.user?.uniqueId, nm(d.user), d.comment, av(d.user)));
     conn.on(WebcastEvent.GIFT, d => {
       const type = d.giftDetails?.giftType ?? d.extendedGiftInfo?.type;
-      if (type === 1 && !d.repeatEnd) return;                       // streak still running
       const gname = d.giftDetails?.giftName || d.extendedGiftInfo?.name || 'quà';
       const dia = d.giftDetails?.diamondCount ?? d.extendedGiftInfo?.diamond_count ?? 1;
-      onGift(d.user?.uniqueId || d.user?.userId, nm(d.user), gname, d.repeatCount || 1, dia, av(d.user));
-      addLog(`🎁 ${nm(d.user)} tặng ${gname} x${d.repeatCount || 1}`);
+      const id = d.user?.userId || d.user?.uniqueId;
+      const result = gifts.process({ userId:id, giftId:d.giftId || d.giftDetails?.giftId || d.extendedGiftInfo?.id, groupId:d.groupId || d.group_id, eventId:d.msgId || d.common?.msgId, repeatCount:d.repeatCount || 1, repeatEnd:d.repeatEnd, isStreak:type == null ? null : type === 1 });
+      if (result.delta) onGift(id, nm(d.user), gname, result.delta, dia, av(d.user));
+      else if (result.reason === 'ambiguous_streak' || result.reason === 'missing_identity') addLog('Không đủ mã sự kiện quà để chống đếm trùng; cần kiểm tra dữ liệu.');
+      saveState();
     });
-    conn.on(WebcastEvent.MEMBER, d => { if (settings.joinOnEnter) seat(d.user?.uniqueId, nm(d.user), { avatar: av(d.user) }); });
-    conn.on(WebcastEvent.LIKE, d => broadcast({ t:'like', id: d.user?.uniqueId, n: d.likeCount || 1 }));
+    conn.on(WebcastEvent.MEMBER, d => { const id=d.user?.userId || d.user?.uniqueId; if (id && settings.joinOnEnter) seat(id, nm(d.user), { avatar: av(d.user) }); });
+    conn.on(WebcastEvent.LIKE, d => onLike(d.user?.userId || d.user?.uniqueId, nm(d.user), d.likeCount || 1, av(d.user)));
     conn.on(ControlEvent.DISCONNECTED, () => { tiktokState = { ...tiktokState, status: 'disconnected' }; broadcast({ t:'tiktok', ...tiktokState }); addLog('TikTok: mất kết nối'); });
     conn.on(ControlEvent.ERROR, e => addLog('TikTok lỗi: ' + (e?.info || e?.message || e)));
     const st = await conn.connect();
@@ -185,7 +211,7 @@ function fillDemo(n){
     seat('demo_' + i, name, { demo: true, skin: ['man','woman','woman','man','granny','monk','nun','child'][i % 8] });
   }
 }
-function clearSeats(){ viewers.clear(); broadcast(snapshot()); addLog('Đã làm trống bồ đoàn'); }
+function clearSeats(){ viewers.clear(); saveState(); broadcast(snapshot()); addLog('Đã làm trống bồ đoàn'); }
 
 /* ------------------------------------------------------------- control */
 function onControl(m){
@@ -194,15 +220,15 @@ function onControl(m){
     case 'disconnect': disconnectTikTok(); addLog('Đã ngắt kết nối TikTok'); break;
     case 'chat': { const n = String(m.name || 'Khách').slice(0, 18); onChat('sim_' + n, n, String(m.text || 'Nam mô A Di Đà Phật').slice(0, 120)); break; }
     case 'gift': { const n = String(m.name || 'Khách').slice(0, 18); onGift('sim_' + n, n, String(m.gift || 'Hoa hồng').slice(0, 30), clamp(m.count, 1, 99), clamp(m.diamonds, 1, 50000)); break; }
+    case 'like': { const n=String(m.name || 'Khách').slice(0,18); onLike('sim_'+n,n,clamp(m.count,1,10000)); break; }
     case 'fill': fillDemo(clamp(m.n, 1, 100)); addLog(`Đổ người mẫu: ${viewers.size} người`); break;
     case 'clear': clearSeats(); break;
     case 'bell': broadcast({ t:'bell' }); break;
     case 'mo': broadcast({ t:'mo1' }); break;
-    case 'chant': chant(); break;
     case 'say': if (m.text) say(String(m.text).slice(0, 400), { tag:'say' }); break;
     case 'settings':
       applySettings(m.settings || {});
-      scheduleChant(); broadcast({ t:'settings', settings, cap: capacity() }); break;
+      broadcast({ t:'settings', settings, cap: capacity() }); saveState(); break;
     case 'bots': setBots(!!m.on, +m.n || 12, m.pace); break;
   }
 }
@@ -211,8 +237,8 @@ function onControl(m){
 const SETTING_RULES = {
   title: v => String(v).slice(0, 40), subtitle: v => String(v).slice(0, 60),
   voice: v => ['vi-VN-NamMinhNeural', 'vi-VN-HoaiMyNeural'].includes(v) ? v : settings.voice,
-  pitch: v => clamp(v, -50, 50), rate: v => clamp(v, -50, 50), moBpm: v => clamp(v, 20, 120), chantEveryMin: v => clamp(v, 1, 60),
-  music: Boolean, mo: Boolean, autoChant: Boolean, joinOnEnter: Boolean,
+  pitch: v => clamp(v, -50, 50), rate: v => clamp(v, -50, 50), moBpm: v => clamp(v, 20, 120),
+  music: Boolean, mo: Boolean, joinOnEnter: Boolean,
   seatMode: v => ['auto', '24', '36', '64', '100'].includes(String(v)) ? String(v) : 'auto',
 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, Math.round(+v || 0)));
@@ -232,7 +258,7 @@ function setBots(on, n, pace){
       const ids = [...viewers.keys()].filter(id => id.startsWith('bot_')); if (!ids.length) return;
       const id = ids[Math.floor(Math.random() * ids.length)], v = viewers.get(id), r = Math.random();
       if (r < .62) onChat(id, v.name, BOT_LINES[Math.floor(Math.random() * BOT_LINES.length)]);
-      else if (r < .9) broadcast({ t:'like', id, n: 1 + Math.floor(Math.random() * 4) });
+      else if (r < .9) onLike(id, v.name, 1 + Math.floor(Math.random() * 4));
       else if (r < .985) onGift(id, v.name, 'Hoa hồng', 1 + Math.floor(Math.random() * 3), 1);
       else onGift(id, v.name, 'Đèn hoa sen', 1, 99);
     }, every);
