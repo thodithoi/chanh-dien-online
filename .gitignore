@@ -8,3 +8,7 @@ Thumbs.db
 
 live/session-state.json
 live/session-state.json.tmp
+
+live/runtime/
+
+__pycache__/

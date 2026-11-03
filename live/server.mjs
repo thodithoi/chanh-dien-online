@@ -6,6 +6,8 @@
 //   cd live && npm install && node server.mjs        → http://localhost:3000/live/control.html
 //
 import http from 'node:http';
+import { randomBytes } from 'node:crypto';
+import { bookmarklet, validToken, bridgeMessage } from './modules/chat-bridge.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,14 +15,18 @@ import { WebSocketServer } from 'ws';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { GiftProcessor } from './modules/gift-processor.mjs';
 import { Session } from './modules/session.mjs';
-import { YouTubeChat } from './modules/youtube.mjs';
+import { ChatLedger, videoId, YouTubeChat } from './modules/youtube.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');            // repo root: serves /assets, /live
 const TTS_DIR = path.join(__dirname, 'tts');
 fs.mkdirSync(TTS_DIR, { recursive: true });
 for (const f of fs.readdirSync(TTS_DIR)) { try { fs.unlinkSync(path.join(TTS_DIR, f)); } catch {} }
-const PORT = +process.env.PORT || 3000;
+const PORT = +process.env.PORT || 3481;
+const APP_VERSION='v2-youtube-no-key-1';
+const bridgeToken=randomBytes(32).toString('hex');
+const chatLedger=new ChatLedger();
+let youtubeVideo='', youtubeMode='direct', bridgeSocket=null;
 
 /* ------------------------------------------------------------------ state */
 const settings = {
@@ -47,7 +53,7 @@ let saveTimer;
 function saveState() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { const tmp = STATE_FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({version:1, startedAt, settings, session:session.snapshot(), gifts:gifts.snapshot(), viewers:[...viewers.values()].filter(v => !v.demo)})); fs.renameSync(tmp, STATE_FILE); }
+    try { const tmp = STATE_FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({version:1, startedAt, settings, session:session.snapshot(), gifts:gifts.snapshot(), youtubeVideo, youtubeMode, viewers:[...viewers.values()].filter(v => !v.demo)})); fs.renameSync(tmp, STATE_FILE); }
     catch (e) { console.error('Không thể lưu trạng thái:', e.message); }
   }, 100);
 }
@@ -164,18 +170,24 @@ async function pumpTTS(){
   ttsBusy = false; setTimeout(pumpTTS, 50);
 }
 
-/* YouTube: the key is held in memory only; never log or include it in snapshots. */
-function connectYouTube(video, apiKey) {
+/* Read-only YouTube chat. No credentials or cookies. */
+function connectYouTube(video) {
+  youtubeVideo=videoId(video)||''; youtubeMode='direct'; bridgeSocket?.close(); saveState();
   if (youtube) youtube.stop();
   let client;
-  client = new YouTubeChat({video, apiKey, onMessage:m=>onChat(m.id,m.name,m.text,m.avatar), onStatus:(status,message)=>{
+  client = new YouTubeChat({video, ledger:chatLedger, onMessage:handleYouTubeMessage, onStatus:(status,message)=>{
     if (youtube !== client) return;
     youtubeState = {status,message}; broadcast({t:'youtube', ...youtubeState});
   }});
   youtube=client;
   client.start();
 }
-function disconnectYouTube() { if(youtube) youtube.stop(); youtube=null; }
+function handleYouTubeMessage(m) {
+  onChat(m.id,m.name,m.text,m.avatar);
+  if(m.paid) broadcast({t:'gift',id:m.id,name:m.name,giftName:'Super Chat / Sticker '+m.amount,count:1,coins:0,total:0,tier:1,prayer:'Nam mô A Di Đà Phật'});
+}
+function disconnectYouTube() { if(youtube) youtube.stop(); youtube=null; bridgeSocket?.close(); bridgeSocket=null; youtubeVideo=''; youtubeState={status:'idle',message:'Đã ngắt YouTube.'}; broadcast({t:'youtube',...youtubeState}); saveState(); }
+
 
 /* --------------------------------------------------------------- TikTok */
 let TikTokLib = null;
@@ -233,7 +245,7 @@ function onControl(m){
   switch (m.cmd){
     case 'connect': connectTikTok(m.uniqueId); break;
     case 'disconnect': disconnectTikTok(); addLog('Đã ngắt kết nối TikTok'); break;
-    case 'youtube_connect': connectYouTube(String(m.video||'').slice(0,500),String(m.apiKey||'').slice(0,300)); break;
+    case 'youtube_connect': connectYouTube(String(m.video||'').slice(0,500)); break;
     case 'youtube_disconnect': disconnectYouTube(); break;
     case 'chat': { const n = String(m.name || 'Khách').slice(0, 18); onChat('sim_' + n, n, String(m.text || 'Nam mô A Di Đà Phật').slice(0, 120)); break; }
     case 'gift': { const n = String(m.name || 'Khách').slice(0, 18); onGift('sim_' + n, n, String(m.gift || 'Hoa hồng').slice(0, 30), clamp(m.count, 1, 99), clamp(m.diamonds, 1, 50000)); break; }
@@ -312,8 +324,18 @@ function resolveStatic(urlPath){
 }
 const server = http.createServer((req, res) => {
   if (!okHost(req.headers.host)) { res.writeHead(421).end('wrong host'); return; }
-  if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405).end(); return; }
   let p; try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400).end(); return; }
+  if(req.method!=='GET' && req.method!=='HEAD' && !(req.method==='POST' && p==='/api/bridge')){res.writeHead(405).end();return;}
+  if(p==='/health') { res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify({app:'thien-an',version:APP_VERSION,pid:process.pid,uptime:Math.floor(process.uptime()),youtube:youtubeState})); return; }
+  if(p==='/api/bridge') {
+    // Only the local control page can prepare the bridge. Never allow cross-origin reads.
+    if(req.method!=='POST' || !req.headers.origin || !['http://127.0.0.1:'+PORT,'http://localhost:'+PORT].includes(req.headers.origin)){res.writeHead(403).end();return;}
+    const video=videoId(new URL(req.url,'http://x').searchParams.get('video'));
+    if(!video){res.writeHead(400).end('invalid video');return;}
+    if(youtube)youtube.stop(); youtube=null; bridgeSocket?.close(); youtubeVideo=video; youtubeMode='bridge'; saveState();
+    youtubeState={status:'connecting',message:'Cầu nối: chờ mở chat và bấm dấu trang.'};broadcast({t:'youtube',...youtubeState});
+    res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(JSON.stringify({bookmark:bookmarklet({base:`http://127.0.0.1:${PORT}`,token:bridgeToken,video}),chat:`https://www.youtube.com/live_chat?v=${video}&is_popout=1`}));return;
+  }
   const file = resolveStatic(p);
   if (!file) { res.writeHead(404).end('not found'); return; }
   fs.stat(file, (err, st) => {
@@ -321,23 +343,42 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Cache-Control': p.startsWith('/live/tts/') ? 'no-store' : 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
     if (req.method === 'HEAD') { res.end(); return; }
-    fs.createReadStream(file).pipe(res);
+    const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
   });
 });
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024,
   verifyClient: ({ origin, req }) => {
     if (!okHost(req.headers.host)) return false;
+    const u=new URL(req.url,'http://x');
+    if(u.searchParams.get('role')==='bridge' && !validToken(u.searchParams.get('token'),bridgeToken))return false;
     if (!origin) return true;                                   // OBS / non-browser clients send no Origin
     try { return okHost(new URL(origin).host); } catch { return false; }
   } });
 function broadcast(msg, only){ const s = JSON.stringify(msg); for (const c of wss.clients) if (c.readyState === 1 && (!only || c.role === only)) c.send(s); }
 wss.on('connection', (ws, req) => {
-  ws.role = new URL(req.url, 'http://x').searchParams.get('role') === 'control' ? 'control' : 'overlay';
+  const role=new URL(req.url,'http://x').searchParams.get('role');
+  ws.role=role==='bridge'?'bridge':role==='control'?'control':'overlay';
+  if(ws.role==='bridge') {
+    if(youtubeMode!=='bridge'){ws.close();return;}
+    bridgeSocket?.close();bridgeSocket=ws;
+    youtubeState={status:'connected',message:'Cầu nối đã mở; chờ bình luận mới.'};broadcast({t:'youtube',...youtubeState});
+    ws.on('close',()=>{if(bridgeSocket===ws){bridgeSocket=null;youtubeState={status:'connecting',message:'Cầu nối đã đóng; mở lại cầu nối hoặc dùng kết nối trực tiếp.'};broadcast({t:'youtube',...youtubeState});}});
+  }
+  ws.isAlive=true;ws.on('pong',()=>{ws.isAlive=true;});ws.on('error',()=>{});
   ws.send(JSON.stringify(snapshot()));
   if (ws.role === 'control') ws.send(JSON.stringify({ t:'logs', lines: log }));
   ws.on('message', buf => {
+    if(ws.role==='bridge') {
+      if(ws!==bridgeSocket || youtubeMode!=='bridge')return;
+      const now=Date.now();if(!ws.rateStart || now-ws.rateStart>1000){ws.rateStart=now;ws.rateCount=0;}if(++ws.rateCount>100)return;
+      try{const m=JSON.parse(buf);const event=m.t==='bridge_chat' && bridgeMessage(m,youtubeVideo);if(event&&chatLedger.accept(event.eventId))handleYouTubeMessage(event);}catch{}
+      return;
+    }
     if (ws.role !== 'control') return;                          // overlays only listen
     try { const m = JSON.parse(buf); if (m && m.t === 'ctl') onControl(m); } catch (e) { addLog('Lệnh lỗi: ' + e.message); }
   });
 });
-server.listen(PORT, HOST, () => addLog(`Server chạy tại http://localhost:${PORT}  ·  Bảng điều khiển: http://localhost:${PORT}/live/control.html  ·  Overlay: http://localhost:${PORT}/live/overlay.html`));
+server.on('error',e=>{console.error(e.code==='EADDRINUSE'?`Cổng ${PORT} đang được dùng. Mở bảng điều khiển hiện có; không tự đổi cổng.`:'Không thể mở máy chủ: '+e.code);process.exit(1);});
+wss.on('error',()=>{});
+setInterval(()=>{for(const c of wss.clients){if(!c.isAlive){c.terminate();continue;}c.isAlive=false;c.ping();}},30000).unref();
+server.listen(PORT, HOST, () => { if(saved.youtubeVideo && saved.youtubeMode!=='bridge')connectYouTube(saved.youtubeVideo); addLog(`Server chạy tại http://localhost:${PORT}  ·  Bảng điều khiển: http://localhost:${PORT}/live/control.html  ·  Overlay: http://localhost:${PORT}/live/overlay.html`); });

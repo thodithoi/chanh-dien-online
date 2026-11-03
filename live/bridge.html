@@ -1,0 +1,12 @@
+<!doctype html><html lang="vi"><meta charset="utf-8"><title>Cầu nối chat · Thiện An</title>
+<style>body{background:#21180f;color:#f5dfa6;font:20px system-ui;padding:24px}button{padding:12px}</style>
+<h1>Cầu nối YouTube</h1><p id="status">Đang kết nối máy chủ…</p><p>Giữ cửa sổ này và trang chat mở. Chọn “Live chat” thay cho “Top chat” để nhận đầy đủ hơn.</p><button id="stop">Dừng cầu nối</button>
+<script>
+const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+let ws,stopped=false,received=0;const status=document.getElementById('status');
+function connect(){if(stopped)return;ws=new WebSocket(`ws://${location.host}/ws?role=bridge&token=${encodeURIComponent(token)}`);
+ws.onopen=()=>{status.textContent='Đã nối máy chủ; đang chờ bình luận mới.';opener?.postMessage({type:'thienan-ready',token},'https://www.youtube.com');};
+ws.onclose=()=>{if(!stopped){status.textContent='Mất kết nối, đang nối lại…';setTimeout(connect,2000);}};}
+window.addEventListener('message',e=>{if(stopped||e.source!==opener||e.origin!=='https://www.youtube.com'||e.data?.type!=='thienan-chat'||e.data.token!==token||ws?.readyState!==1)return;ws.send(JSON.stringify({t:'bridge_chat',...e.data.message}));status.textContent=`Đã chuyển ${++received} bình luận. Bình luận cuối lúc ${new Date().toLocaleTimeString('vi-VN')}.`;});
+document.getElementById('stop').onclick=()=>{stopped=true;ws?.close();status.textContent='Đã dừng. Đóng cửa sổ này và trang chat nếu đã dùng xong.';};connect();
+</script></html>

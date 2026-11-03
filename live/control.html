@@ -59,10 +59,10 @@ button.red{background:var(--red);border-color:#b84a33}
     <h2>1 · Kết nối YouTube LIVE</h2>
     <label for="ytVideo">Đường dẫn video LIVE hoặc mã video</label>
     <input id="ytVideo" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
-    <label for="ytKey">YouTube Data API key</label>
-    <input id="ytKey" type="password" autocomplete="off" placeholder="Nhập tại đây, không gửi qua chat">
     <div class="row"><button class="primary" id="btnYTConnect">Kết nối YouTube</button><button id="btnYTDisconnect">Ngắt YouTube</button></div>
-    <p class="hint">Video cần đang LIVE và bật live chat. Chỉ đọc bình luận mới; lượt thích và Super Chat chưa được tích hợp. Khóa chỉ nằm trong bộ nhớ máy chủ và gửi tới Google, không lưu vào tệp.</p>
+    <p class="hint">Dán link LIVE công khai hoặc không công khai; không cần khóa API. Nhận bình luận mới và Super Chat/Sticker. Lượt thích YouTube chưa tích hợp. Kết nối không chính thức có thể gián đoạn; hình và nhạc vẫn chạy.</p>
+    <button id="btnBridge">Chuẩn bị cầu nối dự phòng</button>
+    <div id="bridgeHelp" hidden><p>1. Kéo liên kết <a id="bridgeBookmark">Thiện An · nối chat</a> lên thanh dấu trang.<br>2. <a id="bridgeChat" target="_blank" rel="noopener">Mở chat rời</a>, chọn Live chat.<br>3. Trên trang chat, bấm dấu trang vừa lưu và cho phép mở cửa sổ cầu nối. Giữ cả hai cửa sổ mở.</p><p>Cầu nối chỉ chuyển chat mà tài khoản hiện tại xem được. Sau khi máy chủ khởi động lại, hãy chuẩn bị dấu trang mới.</p></div>
     <h2>Kết nối TikTok LIVE</h2>
     <label for="uid">Username kênh đang live</label>
     <div class="row"><input id="uid" placeholder="@tenkenhcuaban" autocomplete="off"><button class="primary" id="btnConnect">Kết nối</button><button id="btnDisconnect">Ngắt</button></div>
@@ -177,7 +177,10 @@ function connect(){
 connect();
 fetch('/assets/audio/bell-neptun.wav',{method:'HEAD'}).then(r=>{ $('bellStatus').textContent=r.ok?'Chuông: đã có bản thu':'Chuông: chưa có bản thu; đang dùng âm tổng hợp'; }).catch(()=>{ $('bellStatus').textContent='Chuông: chưa kiểm tra được bản thu'; });
 
-$('btnYTConnect').onclick = () => { if(ws?.readyState!==1) { setYT({status:'error',message:'Máy chủ chưa kết nối.'}); return; } const apiKey=$('ytKey').value; send('youtube_connect',{video:$('ytVideo').value,apiKey}); $('ytKey').value=''; };
+$('btnYTConnect').onclick = () => { if(ws?.readyState!==1) { setYT({status:'error',message:'Máy chủ chưa kết nối.'}); return; } localStorage.setItem('thienan-video',$('ytVideo').value); send('youtube_connect',{video:$('ytVideo').value}); };
+$('ytVideo').value=localStorage.getItem('thienan-video')||'';
+$('btnBridge').onclick=async()=>{try{const r=await fetch('/api/bridge?video='+encodeURIComponent($('ytVideo').value),{method:'POST'});if(!r.ok)throw Error();const d=await r.json();$('bridgeBookmark').href=d.bookmark;$('bridgeChat').href=d.chat;$('bridgeHelp').hidden=false;}catch{setYT({status:'error',message:'Cần đường dẫn video hợp lệ và máy chủ đang chạy.'});}};
+$('bridgeBookmark').onclick=e=>{e.preventDefault();alert('Kéo liên kết này lên thanh dấu trang. Bấm dấu trang đó khi đang ở cửa sổ chat YouTube.');};
 $('btnYTDisconnect').onclick = () => send('youtube_disconnect');
 $('btnConnect').onclick = () => send('connect', { uniqueId: $('uid').value });
 $('uid').onkeydown = e => { if (e.key==='Enter') send('connect', { uniqueId: $('uid').value }); };

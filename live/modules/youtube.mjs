@@ -1,4 +1,4 @@
-// YouTube Data API: read-only access to an active video's live chat.
+import { Innertube } from 'youtubei.js';
 export function videoId(input) {
   const s = String(input || '').trim();
   if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
@@ -16,67 +16,54 @@ export function videoId(input) {
   } catch { return null; }
 }
 
+
+// One ledger is shared by direct chat and the browser bridge.
+export class ChatLedger {
+  constructor(limit = 20000) { this.limit=limit; this.ids=new Set(); }
+  accept(id) { if (!id || this.ids.has(id)) return false; this.ids.add(id); if(this.ids.size>this.limit)this.ids.delete(this.ids.values().next().value); return true; }
+}
+export function normalizeItem(item) {
+  if (!['LiveChatTextMessage','LiveChatPaidMessage','LiveChatPaidSticker'].includes(item?.type)) return null;
+  const author=item.author;
+  if (!item.id || !author?.id) return null;
+  return {eventId:String(item.id), id:`youtube:${author.id}`, name:String(author.name || 'Phật tử'),
+    text:String(item.message || ''), avatar:author.thumbnails?.[0]?.url || '',
+    paid:item.type!=='LiveChatTextMessage', amount:String(item.purchase_amount || ''), timestamp:item.timestamp};
+}
 export class YouTubeChat {
-  constructor({ apiKey, video, onMessage, onStatus, fetchImpl = fetch, wait = defaultWait }) {
-    this.key = String(apiKey || '').trim(); this.video = videoId(video);
-    this.onMessage = onMessage; this.onStatus = onStatus;
-    this.fetch = fetchImpl; this.wait = wait; this.controller = new AbortController();
-    this.page = ''; this.initial = true; this.seen = new Set();
-  }
-  async request(path, params) {
-    const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
-    for (const [key, value] of Object.entries({...params, key:this.key})) if (value) url.searchParams.set(key, value);
-    const res = await this.fetch(url, {signal:this.controller.signal});
-    if (!res.ok) { const e = new Error('youtube_http'); e.status = res.status; throw e; }
-    return res.json();
+  constructor({video,onMessage,onStatus,ledger=new ChatLedger(),create=options=>Innertube.create(options),retryMs=5000}) {
+    Object.assign(this,{video:videoId(video),onMessage,onStatus,ledger,create,retryMs}); this.stopped=false; this.failures=0; this.generation=0;
   }
   async start() {
-    if (!this.key || !this.video) { this.onStatus('error', 'Cần API key và đường dẫn video YouTube hợp lệ.'); return; }
-    this.onStatus('connecting', 'Đang tìm phiên LIVE.');
+    if (!this.video) { this.onStatus('error','Đường dẫn YouTube không hợp lệ.'); return; }
+    const generation=++this.generation;
+    this.onStatus('connecting','Đang kết nối YouTube, không cần khóa API.');
+    this.abort=new AbortController();
+    const abort=this.abort;
     try {
-      const data = await this.request('videos', {part:'liveStreamingDetails', id:this.video});
-      const chat = data.items?.[0]?.liveStreamingDetails?.activeLiveChatId;
-      if (!chat) { this.onStatus('error', 'Không tìm thấy live chat đang hoạt động. Kiểm tra video, quyền truy cập và trạng thái LIVE.'); return; }
-      this.onStatus('connected', 'Đã kết nối live chat.');
-      let failures = 0;
-      while (!this.controller.signal.aborted) {
-        let page;
-        try {
-          page = await this.request('liveChat/messages', {part:'id,snippet,authorDetails', liveChatId:chat, pageToken:this.page, maxResults:'200'});
-          if (failures) this.onStatus('connected', 'Đã kết nối lại live chat.');
-          failures = 0;
-        } catch (e) {
-          if (this.controller.signal.aborted) return;
-          if (e.status === 401 || e.status === 403 || ++failures > 5) throw e;
-          this.onStatus('connecting', 'Mất kết nối tạm thời, đang thử lại.');
-          await this.wait(Math.min(60000, 5000 * 2 ** (failures - 1)), this.controller.signal);
-          continue;
-        }
-        this.processPage(page);
-        if (page.offlineAt) { this.onStatus('ended', 'LIVE đã kết thúc.'); return; }
-        if (!page.nextPageToken) { this.onStatus('error', 'YouTube không trả mã trang tiếp theo; hãy kết nối lại.'); return; }
-        this.page = page.nextPageToken;
-        await this.wait(Math.max(15000, Number(page.pollingIntervalMillis) || 15000), this.controller.signal);
-      }
-    } catch (e) {
-      if (this.controller.signal.aborted) return;
-      const message = e.status === 403 ? 'YouTube từ chối truy cập hoặc đã hết hạn mức API. Kiểm tra API key và quyền API.' : e.status === 401 ? 'API key hoặc quyền truy cập không hợp lệ.' : 'Không kết nối được YouTube. Kiểm tra mạng và thử kết nối lại.';
-      this.onStatus('error', message);
-    }
+      const yt=await this.create({retrieve_player:false, fetch:(input,init={})=>fetch(input,{...init,signal:AbortSignal.any([abort.signal,AbortSignal.timeout(25000)])})});
+      const info=await yt.getInfo(this.video);
+      if (this.stopped || generation!==this.generation) return;
+      if(info.playability_status?.status && info.playability_status.status!=='OK') { this.retry(); return; }
+      if (!info.basic_info?.is_live || info.livechat?.is_replay) { this.onStatus('ended','Video chưa LIVE hoặc đã kết thúc; hãy thử lại khi LIVE bắt đầu.'); return; }
+      const chat=info.getLiveChat();
+      if(chat.is_replay) { this.onStatus('ended','Không đọc lại lịch sử chat của video đã kết thúc.'); return; }
+      this.chat=chat;
+      const active=()=>!this.stopped && generation===this.generation;
+      chat.on('start',()=>{ if(active()){this.failures=0;this.onStatus('connected','Đã kết nối YouTube trực tiếp.');} });
+      // Initial history from the start event is deliberately ignored.
+      chat.on('chat-update',action=>{ if(!active())return; const m=normalizeItem(action.type==='AddChatItemAction'?action.item:null); if(m && this.ledger.accept(m.eventId)){this.onStatus('connected','Đang nhận bình luận YouTube.');this.onMessage(m);} });
+      chat.on('error',()=>{ if(active())this.onStatus('connecting','YouTube gián đoạn; đang thử nối lại. Hình và nhạc vẫn chạy.'); });
+      chat.on('end',()=>{ if(active())this.retry(); });
+      chat.start();
+    } catch { if(!this.stopped && generation===this.generation)this.retry(); }
   }
-  processPage(page) {
-    for (const item of page.items || []) {
-      const id = item.id;
-      if (!id || this.seen.has(id)) continue;
-      this.seen.add(id); if (this.seen.size > 5000) this.seen.delete(this.seen.values().next().value);
-      const author = item.authorDetails;
-      const text = item.snippet?.textMessageDetails?.messageText;
-      if (!this.initial && item.snippet?.type === 'textMessageEvent' && author?.channelId && typeof text === 'string') {
-        this.onMessage({ id:`youtube:${author.channelId}`, name:author.displayName || 'Phật tử', text, avatar:author.profileImageUrl || '' });
-      }
-    }
-    this.initial = false;
+  retry() {
+    ++this.generation; this.chat?.stop(); this.abort?.abort(); clearTimeout(this.timer);
+    if(this.stopped)return;
+    const delay=Math.min(60000,this.retryMs * 2 ** Math.min(this.failures++,4));
+    this.onStatus('connecting',`Chưa đọc được chat; tự thử lại sau ${Math.ceil(delay/1000)} giây. Có thể dùng cầu nối dự phòng.`);
+    this.timer=setTimeout(()=>this.start(),delay);
   }
-  stop() { this.controller.abort(); this.onStatus('idle', 'Đã ngắt kết nối.'); }
+  stop() { this.stopped=true; ++this.generation; clearTimeout(this.timer); this.chat?.stop(); this.abort?.abort(); }
 }
-function defaultWait(ms, signal) { return new Promise(resolve => { if(signal.aborted) return resolve(); const timer=setTimeout(done,ms); function done(){clearTimeout(timer);signal.removeEventListener('abort',done);resolve();} signal.addEventListener('abort',done,{once:true}); }); }
