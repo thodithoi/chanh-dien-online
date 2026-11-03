@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bảng điều khiển · Chánh Điện Tịnh Tâm</title>
+<title>Bảng điều khiển · Chánh Điện Thiện An</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@600;700&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
 <style>
 /* Layout: three columns of cards (connection · interaction · sound/scene) over a status bar; collapses to one column on narrow windows. */
@@ -45,17 +45,25 @@ button.red{background:var(--red);border-color:#b84a33}
 </head>
 <body>
 <header>
-  <h1>Bảng điều khiển · Chánh Điện Tịnh Tâm</h1>
+  <h1>Bảng điều khiển · Chánh Điện Thiện An</h1>
   <div class="status">
     <span class="chip" id="srv">Server: …</span>
     <span class="chip" id="tt">TikTok: chưa kết nối</span>
+    <span class="chip" id="yt">YouTube: chưa kết nối</span>
     <span class="chip" id="cnt">0 người</span>
   </div>
 </header>
 
 <div class="grid">
   <section class="card">
-    <h2>1 · Kết nối TikTok LIVE</h2>
+    <h2>1 · Kết nối YouTube LIVE</h2>
+    <label for="ytVideo">Đường dẫn video LIVE hoặc mã video</label>
+    <input id="ytVideo" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+    <div class="row"><button class="primary" id="btnYTConnect">Kết nối YouTube</button><button id="btnYTDisconnect">Ngắt YouTube</button></div>
+    <p class="hint">Dán link LIVE công khai hoặc không công khai; không cần khóa API. Nhận bình luận mới và Super Chat/Sticker. Lượt thích YouTube chưa tích hợp. Kết nối không chính thức có thể gián đoạn; hình và nhạc vẫn chạy.</p>
+    <button id="btnBridge">Chuẩn bị cầu nối dự phòng</button>
+    <div id="bridgeHelp" hidden><p>1. Kéo liên kết <a id="bridgeBookmark">Thiện An · nối chat</a> lên thanh dấu trang.<br>2. <a id="bridgeChat" target="_blank" rel="noopener">Mở chat rời</a>, chọn Live chat.<br>3. Trên trang chat, bấm dấu trang vừa lưu và cho phép mở cửa sổ cầu nối. Giữ cả hai cửa sổ mở.</p><p>Cầu nối chỉ chuyển chat mà tài khoản hiện tại xem được. Sau khi máy chủ khởi động lại, hãy chuẩn bị dấu trang mới.</p></div>
+    <h2>Kết nối TikTok LIVE</h2>
     <label for="uid">Username kênh đang live</label>
     <div class="row"><input id="uid" placeholder="@tenkenhcuaban" autocomplete="off"><button class="primary" id="btnConnect">Kết nối</button><button id="btnDisconnect">Ngắt</button></div>
     <p class="hint">Chỉ đọc sự kiện công khai của phòng live (bình luận, quà, tim). Không cần mật khẩu hay cookie TikTok. Phải bật LIVE trước rồi mới kết nối.</p>
@@ -67,11 +75,12 @@ button.red{background:var(--red);border-color:#b84a33}
 
   <section class="card">
     <h2>2 · Thử tương tác</h2>
+    <div id="progress" class="hint">Lạy: 0 · Tràng hạt: 0 · Hoa: 0</div>
     <label for="simName">Tên người xem</label>
     <input id="simName" value="Minh An">
     <label for="simText">Bình luận / lời nguyện</label>
     <input id="simText" value="Nam mô A Di Đà Phật, cầu gia đình bình an">
-    <div class="row"><button id="btnChat">Gửi bình luận</button></div>
+    <div class="row"><button id="btnChat">Gửi bình luận</button><button id="btnLike">Thử 1 lượt thích</button></div>
     <div class="row">
       <button data-gift="Hoa hồng" data-dia="1">Hoa hồng · 1</button>
       <button data-gift="Đèn hoa sen" data-dia="30">Hoa sen · 30</button>
@@ -79,7 +88,7 @@ button.red{background:var(--red);border-color:#b84a33}
     </div>
     <p class="hint">Gõ <b>nam · nữ · sư · ni · tiểu · bà · cao tăng</b> làm bình luận để đổi hình.</p>
     <h2>Đổ người mẫu</h2>
-    <div class="row"><button data-fill="15">15</button><button data-fill="36">36</button><button data-fill="64">64</button><button data-fill="100">100</button></div>
+    <div class="row"><button data-fill="15">15</button><button data-fill="36">36</button><button data-fill="64">64</button><button data-fill="100">100</button><button data-fill="300">300</button><button data-fill="1000">1000</button></div>
     <button class="red" id="btnClear">Làm trống toàn bộ bồ đoàn</button>
     <h2>Bot tương tác mô phỏng</h2>
     <div class="row">
@@ -99,22 +108,21 @@ button.red{background:var(--red);border-color:#b84a33}
     </div>
     <label for="sayText">Đọc thử / phát thông báo</label>
     <textarea id="sayText">Nam mô Bổn Sư Thích Ca Mâu Ni Phật. Nguyện cầu cho tất cả chư vị Phật tử thân tâm thường an lạc, vạn sự cát tường.</textarea>
-    <div class="row"><button class="primary" id="btnSay">Phát lên live</button><button id="btnChant">Đọc kinh định kỳ ngay</button></div>
+    <div class="row"><button class="primary" id="btnSay">Phát lên live</button></div>
     <div class="row tight">
       <label class="check"><input type="checkbox" id="music" checked> Nhạc nền</label>
-      <label class="check"><input type="checkbox" id="mo" checked> Tiếng mõ</label>
-      <label class="check"><input type="checkbox" id="autoChant" checked> Đọc kinh tự động</label>
+      <label class="check"><input type="checkbox" id="mo"> Tiếng mõ</label>
     </div>
     <div class="row">
       <label>Nhịp mõ (BPM)<input id="moBpm" type="number" min="20" max="120" value="52"></label>
-      <label>Đọc kinh mỗi (phút)<input id="chantEveryMin" type="number" min="1" max="60" value="3"></label>
     </div>
     <div class="row"><button id="btnBell">🔔 Thỉnh chuông</button><button id="btnMo">Gõ mõ</button></div>
+    <div id="bellStatus" class="hint">Đang kiểm tra bản thu chuông…</div>
     <h2>Cảnh</h2>
-    <label>Tên thiền đường<input id="title" value="Chánh Điện Tịnh Tâm"></label>
+    <label>Tên thiền đường<input id="title" value="Chánh Điện Thiện An"></label>
     <label>Dòng phụ<input id="subtitle" value="Nam Mô A Di Đà Phật"></label>
     <div class="row">
-      <label>Số chỗ ngồi<select id="seatMode"><option value="auto">Tự mở rộng 24 → 100</option><option value="24">24</option><option value="36">36</option><option value="64">64</option><option value="100">100</option></select></label>
+      <label>Số chỗ ngồi<select id="seatMode"><option value="auto">Tự mở rộng 24 → 100 mỗi lượt</option><option value="24">24</option><option value="36">36</option><option value="64">64</option><option value="100">100</option></select></label>
     </div>
     <label class="check"><input type="checkbox" id="joinOnEnter"> Người vào phòng cũng được ngồi (không cần bình luận)</label>
   </section>
@@ -131,7 +139,7 @@ const $ = id => document.getElementById(id);
 let ws = null;
 const send = (cmd, extra={}) => ws?.readyState===1 && ws.send(JSON.stringify({ t:'ctl', cmd, ...extra }));
 function logLine(s){ const el=$('log'); el.textContent += s + '\n'; el.scrollTop = el.scrollHeight; }
-const SETTING_IDS = ['voice','pitch','rate','music','mo','autoChant','moBpm','chantEveryMin','title','subtitle','seatMode','joinOnEnter'];
+const SETTING_IDS = ['voice','pitch','rate','music','mo','moBpm','title','subtitle','seatMode','joinOnEnter'];
 function fillSettings(s){ for (const k of SETTING_IDS){ const el=$(k); if (!el || s[k]===undefined) continue; if (el.type==='checkbox') el.checked=!!s[k]; else el.value=s[k]; } }
 function readSettings(){ const o={}; for (const k of SETTING_IDS){ const el=$(k); o[k] = el.type==='checkbox' ? el.checked : el.type==='number' ? +el.value : el.value; } return o; }
 const people = new Map();
@@ -142,6 +150,8 @@ function renderPeople(){
   list.forEach((p,i)=>{ const tr=document.createElement('tr'); const a=document.createElement('td'); a.textContent=`${String(i+1).padStart(2,'0')}  ${p.name}`; const b=document.createElement('td'); b.textContent=p.coins? p.coins+' ✧':''; tr.append(a,b); tb.append(tr); });
   $('cnt').textContent = `${people.size} người`;
 }
+function showProgress(p){ if(p) $('progress').textContent=`Lạy: ${p.bows} (${p.bows % 108}/108) · Tràng hạt: ${p.beads} (${p.beads % 108}/108) · Hoa: ${p.roses} · Chờ dâng: ${p.queue.reduce((n,x)=>n+x.count,0)}`; }
+function setYT(st){ if(!st) return; const el=$('yt'); el.className='chip '+(st.status==='connected'?'ok':st.status==='error'?'bad':''); el.textContent='YouTube: '+(st.message || st.status); }
 function setTT(st){
   const el=$('tt'); el.className='chip ' + (st.status==='connected'?'ok':st.status==='error'?'bad':'');
   el.textContent = st.status==='connected' ? `TikTok: @${st.uniqueId} ✓` : st.status==='connecting' ? `TikTok: đang kết nối @${st.uniqueId}…` : st.status==='error' ? 'TikTok: lỗi kết nối' : 'TikTok: chưa kết nối';
@@ -152,10 +162,12 @@ function connect(){
   ws.onclose = () => { $('srv').textContent='Server: mất kết nối'; $('srv').className='chip bad'; setTimeout(connect, 2000); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.t==='state'){ fillSettings(m.settings); setTT(m.tiktok); people.clear(); for (const v of m.viewers) people.set(v.id,v); renderPeople(); }
+    if (m.t==='state'){ showProgress(m.progress); fillSettings(m.settings); setTT(m.tiktok); setYT(m.youtube); people.clear(); for (const v of m.viewers) people.set(v.id,v); renderPeople(); }
+    else if (m.t==='progress') showProgress(m.progress);
     else if (m.t==='logs'){ $('log').textContent=''; m.lines.forEach(logLine); }
     else if (m.t==='log') logLine(m.line);
     else if (m.t==='tiktok') setTT(m);
+    else if (m.t==='youtube') setYT(m);
     else if (m.t==='join'){ people.set(m.v.id,m.v); renderPeople(); }
     else if (m.t==='leave'){ people.delete(m.id); renderPeople(); }
     else if (m.t==='gift'){ const p=people.get(m.id); if(p){ p.coins=m.total; renderPeople(); } }
@@ -163,18 +175,24 @@ function connect(){
   };
 }
 connect();
+fetch('/assets/audio/bell-neptun.wav',{method:'HEAD'}).then(r=>{ $('bellStatus').textContent=r.ok?'Chuông: đã có bản thu':'Chuông: chưa có bản thu; đang dùng âm tổng hợp'; }).catch(()=>{ $('bellStatus').textContent='Chuông: chưa kiểm tra được bản thu'; });
 
+$('btnYTConnect').onclick = () => { if(ws?.readyState!==1) { setYT({status:'error',message:'Máy chủ chưa kết nối.'}); return; } localStorage.setItem('thienan-video',$('ytVideo').value); send('youtube_connect',{video:$('ytVideo').value}); };
+$('ytVideo').value=localStorage.getItem('thienan-video')||'';
+$('btnBridge').onclick=async()=>{try{const r=await fetch('/api/bridge?video='+encodeURIComponent($('ytVideo').value),{method:'POST'});if(!r.ok)throw Error();const d=await r.json();$('bridgeBookmark').href=d.bookmark;$('bridgeChat').href=d.chat;$('bridgeHelp').hidden=false;}catch{setYT({status:'error',message:'Cần đường dẫn video hợp lệ và máy chủ đang chạy.'});}};
+$('bridgeBookmark').onclick=e=>{e.preventDefault();alert('Kéo liên kết này lên thanh dấu trang. Bấm dấu trang đó khi đang ở cửa sổ chat YouTube.');};
+$('btnYTDisconnect').onclick = () => send('youtube_disconnect');
 $('btnConnect').onclick = () => send('connect', { uniqueId: $('uid').value });
 $('uid').onkeydown = e => { if (e.key==='Enter') send('connect', { uniqueId: $('uid').value }); };
 $('btnDisconnect').onclick = () => send('disconnect');
 $('btnOverlay').onclick = () => window.open('/live/overlay.html', 'overlay916', 'width=540,height=960');
+$('btnLike').onclick = () => send('like', {name: $('simName').value, count:1});
 $('btnChat').onclick = () => send('chat', { name: $('simName').value, text: $('simText').value });
 document.querySelectorAll('[data-gift]').forEach(b => b.onclick = () => send('gift', { name: $('simName').value, gift: b.dataset.gift, diamonds: +b.dataset.dia, count: 1 }));
 document.querySelectorAll('[data-fill]').forEach(b => b.onclick = () => send('fill', { n: +b.dataset.fill }));
 $('btnClear').onclick = () => send('clear');
 $('btnBots').onclick = () => send('bots', { on: $('btnBots').textContent.includes('Bật'), n: +$('botN').value, pace: $('botPace').value });
 $('btnSay').onclick = () => send('say', { text: $('sayText').value });
-$('btnChant').onclick = () => send('chant');
 $('btnBell').onclick = () => send('bell');
 $('btnMo').onclick = () => send('mo');
 for (const k of SETTING_IDS) $(k).addEventListener('change', () => send('settings', { settings: readSettings() }));
